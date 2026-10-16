@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-16
+
 ### Added
 
 - The Hisense, Gorenje and ASKO appliances of a ConnectLife account appear in
@@ -39,4 +41,5 @@ the notes of the version's GitHub Release.
   account is never locked by retries.
 - Documentation in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-connectlife/commits/main
+[Unreleased]: https://github.com/guim31/gladys-connectlife/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/guim31/gladys-connectlife/releases/tag/v1.0.1

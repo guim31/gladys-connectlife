@@ -8,8 +8,8 @@
     "de": "Hisense-, Gorenje- und ASKO-Geräte der ConnectLife-App: Klima, Wäsche, Geschirr, Ofen, Kühlschrank.",
     "es": "Aparatos Hisense, Gorenje y ASKO de la app ConnectLife: clima, ropa, vajilla, horno, frigorífico."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/guim31/gladys-connectlife:1.0.0",
+  "version": "1.0.1",
+  "docker_image": "ghcr.io/guim31/gladys-connectlife:1.0.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/guim31/gladys-connectlife/main/cover.png",
   "categories": ["appliances", "climate"],
