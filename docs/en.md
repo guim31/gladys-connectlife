@@ -1,61 +1,150 @@
-# Demo Devices Template
+# ConnectLife
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+## Overview
 
-## What you get
+This integration brings into Gladys the **Hisense, Gorenje and ASKO** appliances you control with
+the **ConnectLife** app: air conditioners, dehumidifiers, washing machines, tumble dryers,
+dishwashers, ovens and refrigerators. It reads them from the ConnectLife cloud, the one the app
+uses, and drives the air conditioners and dehumidifiers.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+It is a community integration, **not affiliated with Hisense, Gorenje, ASKO or ConnectLife**.
+ConnectLife has no public API: the integration speaks the protocol of the app, as the
+community documented it, and may stop working if the manufacturer changes it.
+
+> **Developed without the hardware**: it was written and tested against recorded answers of the
+> ConnectLife cloud, not against a real appliance. Feedback is welcome on the Gladys forum.
+
+## Requirements
+
+- Gladys Assistant **5.1.0** or later.
+- A **ConnectLife account** (the e-mail and password of the app), with your appliances already
+  added in the app. Accounts created with Google, Apple or Facebook have no password: add one in
+  the app first.
+- Internet access from Gladys: everything goes through the ConnectLife cloud.
 
 ## Configuration
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+1. Install the integration (**Integrations → Install from GitHub** if it is not in the store yet).
+2. In its **Configuration** tab, enter the **ConnectLife e-mail** and **password**.
+3. Choose the **refresh interval** (1, 2, 3 or 5 minutes; 2 by default). One request reads all
+   the appliances of the account, whatever their number.
+4. Choose the **language of the feature names** (French by default).
+5. Save: the appliances appear in the **Discovery** tab. Add the ones you want.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+The **List my appliances** button reads the account at once and says what the integration found:
+each appliance, its type, whether Gladys can drive it, and whether it is offline.
 
-## Actions
+## Appliances
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+Every appliance gets a **Connection** feature (online / offline). An offline appliance only
+updates this one: its other values stay as they were last read.
 
-## Scenes
+### Air conditioners
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+Split, portable and window air conditioners:
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+- **Power** — on / off, command.
+- **Mode** — auto, cooling, heating, drying, fan, command. Only the modes of the model are
+  offered (window units have no heating).
+- **Target temperature** — 16 to 32 °C (30 °C for window units), command.
+- **Fan speed** — the speeds of the model, command.
+- **Room temperature** and **room humidity**, when the unit measures them.
 
-## Dashboard
+A unit set to Fahrenheit is shown and driven in Celsius in Gladys.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+### Dehumidifiers
+
+- **Power** — on / off, command.
+- **Mode** — continuous, manual, auto, laundry drying, command.
+- **Fan speed** — low, medium, high, auto, command.
+- **Room humidity** and **target humidity** (read only: Gladys has no humidity setpoint control).
+
+### Washing machines, tumble dryers and dishwashers
+
+Read only:
+
+- **Status** — off, standby, delayed start, running, paused, finished, error.
+- **Time remaining** — in minutes, 0 outside a cycle.
+- **Program** and **Phase** — the code the appliance reports ("Program 9"). Their names depend
+  on the model and are not known to the integration.
+- **Door** — open / closed.
+
+Starting a cycle from Gladys is not offered: loading and closing a machine is done in front of
+it.
+
+### Ovens
+
+Read only, on purpose (a heat source): **Status**, **Oven temperature**, **Time remaining** and
+**Door**.
+
+### Refrigerators
+
+Read only: **Fridge temperature** and **Freezer temperature**, with their **setpoints**, for the
+compartments the model has. The setpoints are not commands: a wrong value would spoil food.
+
+### Other appliances
+
+Hobs, hoods, heat pumps, wine coolers and the types the integration does not know yet are listed
+with their **Connection** alone, read only. The **List my appliances** button shows them as "not
+supported yet".
+
+## Widget
+
+The **ConnectLife appliances** widget shows one line per appliance (ten at most): the washing
+machine running with the time left, the dishwasher finished, the air conditioner on, the fridge
+temperatures, an offline appliance. It follows the language of the dashboard.
+
+## Scene trigger
+
+**Appliance cycle finished** starts a scene when a washing machine, a tumble dryer or a
+dishwasher ends its cycle. Optionally pick the appliance, or the types of appliance; left empty,
+any of them matches.
+
+The next actions of the scene can use:
+
+- `{{triggerEvent.data.device_name}}` — the name of the appliance;
+- `{{triggerEvent.data.appliance_type}}` — `washing_machine`, `tumble_dryer` or `dishwasher`;
+- `{{triggerEvent.data.duration_minutes}}` — the duration the integration saw the cycle run;
+- `{{triggerEvent.data.program}}` — the program code, when the appliance reports it.
+
+A cycle stopped early by hand does not fire it. The end is seen at the next read of the cloud,
+so up to one refresh interval late.
+
+## Scene examples
+
+- **Laundry done**: trigger "Appliance cycle finished", type "Washing machine" → send a message
+  "The laundry is ready ({{triggerEvent.data.duration_minutes}} min)".
+- **Cool the bedroom before bedtime**: at 9:30 pm, if the bedroom is above 26 °C → set the
+  bedroom air conditioner to cooling, 24 °C, power on.
+- **Nobody home**: when the last person leaves → turn the air conditioners off.
 
 ## Troubleshooting
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+- **"ConnectLife refused the e-mail or the password"**: check them in the app. The integration
+  then stops trying until you save the configuration again: repeated failures lock the account.
+- **"Accept its updated terms"**: open the ConnectLife app and accept the new terms; the
+  integration tries again every 30 minutes.
+- **"The ConnectLife cloud does not answer"**: the cloud or your internet access is down. The
+  integration tries again at each refresh.
+- **An appliance is missing**: check it in the app, then press **List my appliances**.
+- **A value looks wrong**: the meaning of some codes depends on the model. Open an issue with the
+  model of the appliance and what the app shows.
+- The logs stay quiet in normal operation; set `LOG_LEVEL=debug` on the container to see every
+  read.
+
+## Limits
+
+- Cloud only: no local control. The values are at most one refresh interval old.
+- The ConnectLife cloud has no published quota; the integration reads it once per interval
+  (one request for all appliances) and keeps its login tokens to avoid logging in again.
+- Program and phase names are not known: codes only.
+- No remote start of washing machines, dryers, dishwashers or ovens, and no fridge setpoint
+  command.
+- The European ConnectLife cloud only (the accounts of the app in Europe).
+
+## Data and privacy
+
+The e-mail and password stay in the Gladys configuration. The login tokens of the cloud are kept
+in the integration's `/data` volume (file `connectlife-tokens.json`, readable by the integration
+only), tagged with a hash of the e-mail, never with the password. Nothing else is stored, and
+nothing is sent anywhere but to the ConnectLife cloud.
