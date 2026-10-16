@@ -12,44 +12,31 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- The Hisense, Gorenje and ASKO appliances of a ConnectLife account appear in
+  Gladys, read from the ConnectLife cloud every 1 to 5 minutes (one request for
+  all the appliances).
+- Air conditioners (split, portable, window): power, mode, target temperature
+  and fan speed as commands; room temperature and humidity.
+- Dehumidifiers: power, mode and fan speed as commands; room and target
+  humidity.
+- Washing machines, tumble dryers and dishwashers: status, time remaining,
+  program and phase codes, door — read only.
+- Ovens (status, temperature, time remaining, door) and refrigerators (fridge
+  and freezer temperatures and setpoints) — read only.
+- A connection state (online / offline) for every appliance; the types the
+  integration does not know yet are listed with it alone, read only.
+- Scene trigger "Appliance cycle finished" for washing machines, dryers and
+  dishwashers, with the appliance name, its type, the observed duration and
+  the program code.
+- Dashboard widget "ConnectLife appliances": one line per appliance with its
+  status and the time left.
+- "List my appliances" button: reads the account and says what was found,
+  what Gladys can drive, and what is offline.
+- Feature names and texts in English, French, German and Spanish; French by
+  default.
+- The login tokens are kept in `/data`: a restart does not log in again. A
+  refused password stops every attempt until the configuration changes, so the
+  account is never locked by retries.
+- Documentation in English, French, German and Spanish.
 
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/guim31/gladys-connectlife/commits/main

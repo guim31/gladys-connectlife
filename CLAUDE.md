@@ -17,11 +17,12 @@ its only runtime dependency. It started from the official JavaScript template.
 npm install
 npm test                                  # node --test, the built-in runner
 node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test --test-name-pattern "cycle"   # tests whose name matches
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
 npx github:GladysAssistant/integration-store .   # store admission checks
+npm run probe                             # real ConnectLife cloud, fake account (needs network)
 ```
 
 The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
@@ -31,16 +32,23 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only: registerHandlers, connect()
+src/app.js                        every SDK handler, registered on a GladysIntegration (tests reuse it)
+src/hub.js                        runtime: polling timer, states, commands, cycle trigger, action
+src/catalog.js                    correspondence table: ConnectLife type code -> kind and features
+src/devices.js                    appliance -> Gladys device/states; Gladys command -> properties
+src/connectlife/protocol.js       endpoints, app identifiers, request signature
+src/connectlife/client.js         login (Gigya -> JWT -> OAuth code -> tokens), gateway calls
+src/connectlife/tokenStore.js     tokens in /data/connectlife-tokens.json (0600)
+src/widgets.js                    dashboard widget content (manifest `widgets`)
+src/i18n.js                       every text, en/fr/de/es
+src/issues.js                     repeated failures logged once
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+scripts/probe.mjs                 read-only probe of the real cloud
+gladys-assistant-integration.json manifest: name, config_schema, actions, trigger, widget
+docs/{en,fr,de,es}.md             user documentation, re-hosted by Gladys, same sections
+test/                             node --test, SDK fake Gladys + fake cloud (test/helpers)
+test/fixtures/connectlife/        anonymized gateway answer (written for this repo)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -70,8 +78,10 @@ test/                             node --test, against the SDK's fake Gladys (in
   `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
   code (defaults, action, scene and widget handlers): change both sides
   together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
+- **User-facing text** exists in four languages (English, French, German with
+  "du", Spanish with "usted"): action messages, manifest texts, feature names,
+  widget texts, and `docs/en.md`, `fr.md`, `de.md`, `es.md` with the same
+  sections. `test/i18n.test.js` enforces it.
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
   in English. Tests never touch the network.
 
@@ -233,3 +243,54 @@ long, et sur un « Sie »/« Ihr… » de politesse en allemand. Le store exige 
 - Docs `en`, `fr`, `de`, `es` avec les mêmes sections.
 - Chauffe, ouverture, sécurité : ne rien rendre pilotable « comme un thermostat » ou par un assistant
   vocal quand une erreur serait dangereuse (leçon d'OctoPrint).
+
+## ConnectLife (propre à cette intégration)
+
+**API.** Pas d'API publique : on parle le protocole de l'appli ConnectLife (cloud européen).
+
+- Connexion en quatre étapes : `accounts.eu1.gigya.com/accounts.login` (formulaire, `APIKey`
+  de l'appli) → `accounts.getJWT` → `oauth.hijuconn.com/oauth/authorize` (JSON,
+  `thirdType: "CDC"`) → `oauth/token` (code puis `refresh_token`). Gigya répond **200 avec un
+  `errorCode`** dans le corps : 403042 identifiants refusés, 206001 conditions à accepter dans
+  l'appli, 403120 compte bloqué.
+- Passerelle `clife-eu-gateway.hijuconn.com` : `GET /clife-svc/pu/get_device_status_list` (tous
+  les appareils et leurs propriétés en **une** requête), `POST /device/pu/property/set`
+  (`{ puid, properties }`, valeurs en **chaînes**). Chaque requête est signée : paramètres triés,
+  objets en JSON compact, suffixe fixe, SHA-256, chiffré RSA PKCS#1 v1.5 avec la clé publique
+  de la passerelle. `randStr` est un nonce : 101005 = déjà vu, re-signer ; 100026 = jeton
+  révoqué, une reconnexion.
+- La réponse de la passerelle est parfois servie en `text/html` : lire le texte, puis
+  `JSON.parse`.
+- Les identifiants de l'appli (client OAuth, clé de passerelle) sont dans
+  `src/connectlife/protocol.js` : faits de protocole publiés par les clients libres, pas des
+  secrets d'utilisateur.
+
+**Pièges.**
+
+- **Licences** : `oyvindwe/connectlife` et `connectlife-ha` sont **GPL-3.0**. On les lit pour le
+  protocole, on ne recopie ni code, ni fichier de correspondance YAML, ni dump. La table de
+  `src/catalog.js` et les fixtures sont écrites pour ce dépôt. `bilan/connectlife-api-connector`
+  est MIT.
+- **Gigya bloque un compte** après des échecs répétés : un mot de passe refusé arrête toute
+  tentative jusqu'à un nouvel enregistrement de la configuration ; les jetons sont gardés dans
+  `/data` pour ne pas se reconnecter à chaque redémarrage.
+- **Codes propres à chaque type, parfois au modèle** : statut, porte, phase n'ont pas les mêmes
+  codes d'un type à l'autre (porte : 025 « 1 ouverte, 3 fermée », 015/030 « 1 fermée,
+  2 ouverte », 003/004 « 0 fermée, 1 ouverte », 023 « 3041/3042 »). Les noms des programmes
+  dépendent du modèle : on publie le code.
+- **Valeurs « absentes »** : 255, 1023, 65535, 16777215 = pas de valeur ; humidité 128 = pas de
+  capteur ; -40 sur un compartiment de frigo = compartiment absent (pas de fonctionnalité).
+- **`offlineState` 1 = en ligne.** Un appareil hors ligne garde sa dernière `statusList` : on ne
+  publie alors que la connexion.
+- **Fahrenheit** : `t_temp_type` 1 (climatiseurs), `Oven_temperature_unit` 2 (fours) ; tout est
+  converti en °C pour Gladys et reconverti à l'écriture.
+- **Fin de cycle** : beaucoup de modèles reviennent en veille sans état « terminé ». Le
+  déclencheur part sur « terminé », ou sur « en marche → veille/éteint » quand la lecture
+  précédente donnait au plus une période (+2 min) de temps restant ; un arrêt manuel ne le
+  déclenche pas, une première lecture non plus.
+- **Sécurité** : fours, consignes de frigo, lancement des lave-linge/sèche-linge/lave-vaisselle
+  en lecture seule. Seuls climatiseurs et déshumidificateurs sont pilotables.
+- **Sandbox de la session de code** : le proxy refuse Gigya et HijuConn ; `scripts/probe.mjs`
+  est lancé ailleurs par l'orchestrateur. Le classifieur de la session peut refuser des
+  commandes shell sur des fichiers contenant les identifiants de l'appli : passer par les
+  outils de lecture/recherche.

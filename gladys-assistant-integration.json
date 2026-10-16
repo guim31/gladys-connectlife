@@ -1,177 +1,282 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "ConnectLife",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Hisense, Gorenje and ASKO appliances of the ConnectLife app: AC, laundry, dishes, oven, fridge.",
+    "fr": "Appareils Hisense, Gorenje et ASKO de l'appli ConnectLife : clim, linge, vaisselle, four, frigo.",
+    "de": "Hisense-, Gorenje- und ASKO-Geräte der ConnectLife-App: Klima, Wäsche, Geschirr, Ofen, Kühlschrank.",
+    "es": "Aparatos Hisense, Gorenje y ASKO de la app ConnectLife: clima, ropa, vajilla, horno, frigorífico."
   },
   "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "docker_image": "ghcr.io/guim31/gladys-connectlife:1.0.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/guim31/gladys-connectlife/main/cover.png",
+  "categories": ["appliances", "climate"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your ConnectLife account",
+        "fr": "Votre compte ConnectLife",
+        "de": "Dein ConnectLife-Konto",
+        "es": "Su cuenta ConnectLife"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Use the e-mail and password of the ConnectLife app. The integration reads your appliances from the ConnectLife cloud; it is not affiliated with Hisense, Gorenje or ASKO.",
+        "fr": "Utilisez l'e-mail et le mot de passe de l'application ConnectLife. L'intégration lit vos appareils dans le cloud ConnectLife ; elle n'est pas affiliée à Hisense, Gorenje ou ASKO.",
+        "de": "Verwende die E-Mail-Adresse und das Passwort der ConnectLife-App. Die Integration liest deine Geräte aus der ConnectLife-Cloud; sie ist nicht mit Hisense, Gorenje oder ASKO verbunden.",
+        "es": "Utilice el correo y la contraseña de la aplicación ConnectLife. La integración lee sus aparatos en la nube de ConnectLife; no está afiliada a Hisense, Gorenje ni ASKO."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://connectlife.io",
+          "label": {
+            "en": "ConnectLife website",
+            "fr": "Site de ConnectLife",
+            "de": "ConnectLife-Website",
+            "es": "Sitio web de ConnectLife"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "username",
+      "type": "string",
+      "label": {
+        "en": "ConnectLife e-mail",
+        "fr": "E-mail ConnectLife",
+        "de": "ConnectLife-E-Mail",
+        "es": "Correo de ConnectLife"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": {
+        "en": "e.g. me@example.com",
+        "fr": "ex. moi@example.com",
+        "de": "z. B. ich@example.com",
+        "es": "p. ej. yo@example.com"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "ConnectLife password",
+        "fr": "Mot de passe ConnectLife",
+        "de": "ConnectLife-Passwort",
+        "es": "Contraseña de ConnectLife"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "poll_interval",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "label": {
+        "en": "Refresh interval",
+        "fr": "Intervalle de rafraîchissement",
+        "de": "Aktualisierungsintervall",
+        "es": "Intervalo de actualización"
+      },
+      "description": {
+        "en": "How often the ConnectLife cloud is read. One request lists all the appliances.",
+        "fr": "Fréquence de lecture du cloud ConnectLife. Une requête liste tous les appareils.",
+        "de": "Wie oft die ConnectLife-Cloud gelesen wird. Eine Anfrage liefert alle Geräte.",
+        "es": "Frecuencia de lectura de la nube de ConnectLife. Una petición lista todos los aparatos."
+      },
       "required": false,
-      "default": "celsius",
+      "default": "2",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "1",
+          "label": { "en": "1 minute", "fr": "1 minute", "de": "1 Minute", "es": "1 minuto" }
+        },
+        {
+          "value": "2",
+          "label": { "en": "2 minutes", "fr": "2 minutes", "de": "2 Minuten", "es": "2 minutos" }
+        },
+        {
+          "value": "3",
+          "label": { "en": "3 minutes", "fr": "3 minutes", "de": "3 Minuten", "es": "3 minutos" }
+        },
+        {
+          "value": "5",
+          "label": { "en": "5 minutes", "fr": "5 minutes", "de": "5 Minuten", "es": "5 minutos" }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms de fonctionnalités",
+        "de": "Sprache der Funktionsnamen",
+        "es": "Idioma de los nombres de funciones"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Names given to the features of new appliances, and texts such as the status.",
+        "fr": "Noms donnés aux fonctionnalités des nouveaux appareils, et textes comme l'état.",
+        "de": "Namen der Funktionen neuer Geräte und Texte wie der Status.",
+        "es": "Nombres de las funciones de los aparatos nuevos y textos como el estado."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": "fr",
+      "options": [
+        {
+          "value": "en",
+          "label": { "en": "English", "fr": "Anglais", "de": "Englisch", "es": "Inglés" }
+        },
+        {
+          "value": "fr",
+          "label": { "en": "French", "fr": "Français", "de": "Französisch", "es": "Francés" }
+        },
+        {
+          "value": "de",
+          "label": { "en": "German", "fr": "Allemand", "de": "Deutsch", "es": "Alemán" }
+        },
+        {
+          "value": "es",
+          "label": { "en": "Spanish", "fr": "Espagnol", "de": "Spanisch", "es": "Español" }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "list_appliances",
+      "label": {
+        "en": "List my appliances",
+        "fr": "Lister mes appareils",
+        "de": "Meine Geräte auflisten",
+        "es": "Listar mis aparatos"
+      },
+      "timeout_seconds": 60
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "cycle_finished",
+      "label": {
+        "en": "Appliance cycle finished",
+        "fr": "Cycle d'un appareil terminé",
+        "de": "Gerätezyklus beendet",
+        "es": "Ciclo de un aparato terminado"
+      },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "A washing machine, tumble dryer or dishwasher finished its cycle.",
+        "fr": "Un lave-linge, un sèche-linge ou un lave-vaisselle a terminé son cycle.",
+        "de": "Eine Waschmaschine, ein Trockner oder ein Geschirrspüler hat den Zyklus beendet.",
+        "es": "Una lavadora, una secadora o un lavavajillas ha terminado su ciclo."
       },
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
+          "label": { "en": "Appliance", "fr": "Appareil", "de": "Gerät", "es": "Aparato" }
         },
         {
-          "key": "target",
+          "key": "appliance_type",
           "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
+          "label": {
+            "en": "Type of appliance",
+            "fr": "Type d'appareil",
+            "de": "Geräteart",
+            "es": "Tipo de aparato"
+          },
           "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
+            {
+              "value": "washing_machine",
+              "label": {
+                "en": "Washing machine",
+                "fr": "Lave-linge",
+                "de": "Waschmaschine",
+                "es": "Lavadora"
+              }
+            },
+            {
+              "value": "tumble_dryer",
+              "label": {
+                "en": "Tumble dryer",
+                "fr": "Sèche-linge",
+                "de": "Wäschetrockner",
+                "es": "Secadora"
+              }
+            },
+            {
+              "value": "dishwasher",
+              "label": {
+                "en": "Dishwasher",
+                "fr": "Lave-vaisselle",
+                "de": "Geschirrspüler",
+                "es": "Lavavajillas"
+              }
+            }
           ]
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "device_name",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
+          "label": {
+            "en": "Appliance name",
+            "fr": "Nom de l'appareil",
+            "de": "Gerätename",
+            "es": "Nombre del aparato"
+          }
+        },
         {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
+          "key": "appliance_type",
+          "type": "string",
+          "label": {
+            "en": "Type of appliance",
+            "fr": "Type d'appareil",
+            "de": "Geräteart",
+            "es": "Tipo de aparato"
+          }
+        },
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "duration_minutes",
+          "type": "number",
+          "label": {
+            "en": "Observed duration (min)",
+            "fr": "Durée observée (min)",
+            "de": "Beobachtete Dauer (Min.)",
+            "es": "Duración observada (min)"
+          }
+        },
+        {
+          "key": "program",
+          "type": "string",
+          "label": {
+            "en": "Program code",
+            "fr": "Code du programme",
+            "de": "Programmcode",
+            "es": "Código del programa"
+          }
         }
       ]
     }
   ],
   "widgets": [
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
+      "key": "appliances",
+      "label": {
+        "en": "ConnectLife appliances",
+        "fr": "Appareils ConnectLife",
+        "de": "ConnectLife-Geräte",
+        "es": "Aparatos ConnectLife"
       },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "description": {
+        "en": "Status of each appliance: cycle and time left, on or off, fridge temperatures.",
+        "fr": "État de chaque appareil : cycle et temps restant, marche, températures du frigo.",
+        "de": "Status jedes Geräts: Zyklus und Restzeit, ein oder aus, Kühlschranktemperaturen.",
+        "es": "Estado de cada aparato: ciclo y tiempo restante, encendido, temperaturas del frigo."
+      },
+      "icon": "grid"
     }
   ]
 }

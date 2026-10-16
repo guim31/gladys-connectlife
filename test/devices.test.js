@@ -1,240 +1,307 @@
+// -----------------------------------------------------------------------------
+// From appliance properties to Gladys values, and back for the commands.
+// -----------------------------------------------------------------------------
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DEVICE_FEATURE_CATEGORIES,
-  DEVICE_FEATURE_TYPES,
-  DEVICE_POLL_FREQUENCIES,
-  DEVICE_TRANSPORTS,
-} from '@gladysassistant/integration-sdk';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
+import { AC_FAN_SPEED, AC_MODE } from '../src/catalog.js';
 import {
-  DEVICE_BLUEPRINTS,
-  buildDiscoveredDevices,
-  buildTransportEntries,
-  createPoller,
-  findBlueprintByDevice,
-  identifyDevice,
-} from '../src/devices/index.js';
-import { simulateLanSession } from '../src/devices/plug.js';
-import { normalizeConfig } from '../src/config.js';
+  buildDevice,
+  commandFor,
+  cycleStatusOf,
+  isControllable,
+  kindOf,
+  parseStatus,
+  readStates,
+  remainingMinutesOf,
+} from '../src/devices.js';
+import { loadDeviceList } from './helpers/fakeCloud.js';
 
 const gladys = createFakeGladys();
-const config = normalizeConfig();
+const fixtures = loadDeviceList();
+const byType = (code) =>
+  structuredClone(fixtures.find((appliance) => appliance.deviceTypeCode === code));
 
-test('every blueprint exposes the required shape', () => {
-  for (const bp of DEVICE_BLUEPRINTS) {
-    assert.equal(typeof bp.key, 'string', 'key must be a string');
-    assert.equal(typeof bp.deviceExternalId, 'function', 'deviceExternalId must be a function');
-    assert.equal(typeof bp.buildDevice, 'function', 'buildDevice must be a function');
-  }
-});
-
-test('buildDiscoveredDevices returns one payload per blueprint', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
-  assert.equal(devices.length, DEVICE_BLUEPRINTS.length);
-  for (const device of devices) {
-    assert.equal(typeof device.name, 'string');
-    assert.ok(device.external_id, 'each device has an external_id');
-    assert.ok(Array.isArray(device.features) && device.features.length > 0);
-  }
-});
-
-test('Gladys accepts the discovery payload', async () => {
-  // The SDK fake checks the payload like the host API does: external_id
-  // prefix, known category/type/unit, poll_frequency... A refusal is a 400
-  // for the WHOLE list, so no device would show up in the Discovery tab.
-  const fresh = createFakeGladys();
-  await fresh.publishDiscoveredDevices(buildDiscoveredDevices(fresh, config));
-  assert.equal(fresh.fake.discoveredDevices.length, DEVICE_BLUEPRINTS.length);
-});
-
-test('Gladys polls exactly the devices that implement onPoll', () => {
-  const frequencies = Object.values(DEVICE_POLL_FREQUENCIES);
-  for (const bp of DEVICE_BLUEPRINTS) {
-    const device = bp.buildDevice(gladys, config);
-    if (typeof bp.onPoll === 'function') {
-      assert.equal(device.should_poll, true, `${bp.key}: without should_poll, never polled`);
-      assert.ok(frequencies.includes(device.poll_frequency), `${bp.key}: invalid poll_frequency`);
-    } else {
-      assert.notEqual(device.should_poll, true, `${bp.key}: polled for nothing`);
-    }
-  }
-});
-
-test('the poller reads a device at the refresh interval of the config', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const fresh = createFakeGladys();
-  const pollDevice = createPoller();
-  const plug = {
-    external_id: DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(fresh),
-  };
-  const everyFiveMinutes = normalizeConfig({ poll_frequency: 300 });
-
-  assert.equal(await pollDevice(fresh, plug, everyFiveMinutes), true, 'the first poll reads');
-  for (let minute = 1; minute < 5; minute += 1) {
-    t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES);
-    assert.equal(
-      await pollDevice(fresh, plug, everyFiveMinutes),
-      false,
-      `skipped at ${minute} min`,
-    );
-  }
-  // Gladys' tick may land a little early: the read is still due.
-  t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES - 50);
-  assert.equal(await pollDevice(fresh, plug, everyFiveMinutes), true, 'read again at 5 min');
-});
-
-test('the poller retries a failed read at the next poll', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const pollDevice = createPoller();
-  const station = {
-    external_id: DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station').deviceExternalId(
-      gladys,
-    ),
-  };
-  t.mock.method(globalThis, 'fetch', async () => {
-    throw new Error('network down');
-  });
-  await assert.rejects(pollDevice(gladys, station, config), /network down/);
-
-  globalThis.fetch.mock.mockImplementation(async () => ({
-    ok: true,
-    json: async () => ({ current: { temperature_2m: 21.4, relative_humidity_2m: 55 } }),
-  }));
-  t.mock.timers.tick(DEVICE_POLL_FREQUENCIES.EVERY_MINUTES);
-  assert.equal(await pollDevice(gladys, station, config), true, 'not delayed by the failure');
-  assert.equal(gladys.fake.lastState(`${station.external_id}:temperature`), 21.4);
-});
-
-test('the poller ignores a device that has nothing to poll', async () => {
-  const pollDevice = createPoller();
-  const switchId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'switch').deviceExternalId(gladys);
-  assert.equal(await pollDevice(gladys, { external_id: switchId }, config), false);
-  assert.equal(await pollDevice(gladys, { external_id: 'does-not-exist' }, config), false);
-});
-
-test('an idle plug publishes its 0 W once, then only as a heartbeat', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'] });
-  const fresh = createFakeGladys();
-  const plug = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug');
-  await plug.onPoll(fresh, config);
-  await plug.onPoll(fresh, config);
-  assert.equal(fresh.fake.states.length, 1, 'an unchanged value is not sent again');
-  t.mock.timers.tick(30 * 60 * 1000);
-  await plug.onPoll(fresh, config);
-  assert.equal(fresh.fake.states.length, 2, 're-sent after 30 minutes');
-});
-
-test('device external_ids are unique across the catalog', () => {
-  const devices = buildDiscoveredDevices(gladys, config);
-  const ids = devices.map((d) => d.external_id);
-  assert.equal(new Set(ids).size, ids.length, 'no two devices may share an external_id');
-});
-
-test('findBlueprintByDevice routes an external_id back to its owner blueprint', () => {
-  for (const bp of DEVICE_BLUEPRINTS) {
-    const external_id = bp.deviceExternalId(gladys);
-    const found = findBlueprintByDevice(gladys, { external_id });
-    assert.equal(found, bp);
-  }
-});
-
-test('findBlueprintByDevice returns undefined for an unknown device', () => {
-  const found = findBlueprintByDevice(gladys, { external_id: 'does-not-exist' });
-  assert.equal(found, undefined);
-});
-
-test('manifest action keys are unique across blueprints', () => {
-  const keys = DEVICE_BLUEPRINTS.flatMap((bp) => Object.keys(bp.actions ?? {}));
-  assert.equal(new Set(keys).size, keys.length, 'no two blueprints may register the same action');
-});
-
-test('the camera declares a camera/image feature', () => {
-  const cameraBlueprint = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'camera');
-  const device = cameraBlueprint.buildDevice(gladys, config);
-  const imageFeature = device.features.find((f) => f.category === DEVICE_FEATURE_CATEGORIES.CAMERA);
-  assert.ok(imageFeature, 'the camera must carry a camera feature');
-  assert.equal(imageFeature.type, DEVICE_FEATURE_TYPES.CAMERA.IMAGE);
-  assert.equal(imageFeature.read_only, true);
-});
-
-test('onGetImage resolves a base64 JPEG under the 150 KB limit', async () => {
-  const cameraBlueprint = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'camera');
-  const image = await cameraBlueprint.onGetImage(gladys, {
-    device: { external_id: cameraBlueprint.deviceExternalId(gladys) },
-    config,
-  });
-  assert.match(image, /^image\/jpg;base64,/);
-  assert.ok(image.length <= 150 * 1024, 'the image must stay under 150 KB');
-});
-
-test('buildTransportEntries reports one valid entry per dual-channel device', () => {
-  const entries = buildTransportEntries(gladys, config);
-  assert.ok(entries.length > 0, 'the demo plug reports its transport');
-  const validValues = Object.values(DEVICE_TRANSPORTS);
-  for (const entry of entries) {
-    assert.ok(entry.external_id, 'each entry targets a device external_id');
-    assert.ok(validValues.includes(entry.transport), `invalid transport: ${entry.transport}`);
-  }
-});
-
-test('the demo plug honors the GLADYS_PREFER_LOCAL preference', () => {
-  const local = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: true }));
-  const cloud = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: false }));
-  const plugId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(gladys);
-  assert.equal(local.find((e) => e.external_id === plugId).transport, DEVICE_TRANSPORTS.LOCAL);
-  assert.equal(cloud.find((e) => e.external_id === plugId).transport, DEVICE_TRANSPORTS.CLOUD);
-});
-
-test('nominal transport entries never carry a leftover degraded flag', () => {
-  const entries = buildTransportEntries(gladys, config);
-  for (const entry of entries) {
-    assert.equal(entry.degraded, undefined, 'nominal entries must clear the degraded state');
-  }
-});
-
-test('the plug reports a degraded cloud fallback when the LAN session is refused', () => {
-  const plugId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'plug').deviceExternalId(gladys);
-  simulateLanSession(false);
-  try {
-    const entries = buildTransportEntries(gladys, normalizeConfig({ GLADYS_PREFER_LOCAL: true }));
-    const entry = entries.find((e) => e.external_id === plugId);
-    assert.equal(entry.transport, DEVICE_TRANSPORTS.CLOUD, 'falls back to cloud');
-    assert.equal(entry.degraded, true, 'the fallback is flagged degraded');
-    assert.ok(entry.message.en, 'the reason carries at least the mandatory `en` text');
-    assert.ok(entry.message.en.length <= 200, 'tooltip messages are capped at 200 characters');
-  } finally {
-    simulateLanSession(true);
-  }
-});
-
-test('identifyDevice signals a device that implements identify', async () => {
-  const lightId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'light').deviceExternalId(gladys);
-  const message = await identifyDevice(gladys, lightId, config);
-  assert.match(message.en, /signalling/);
-  assert.ok(message.fr, 'the message is multi-language');
-});
-
-test('identifyDevice explains when the device has no way to signal itself', async () => {
-  const weatherId = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station').deviceExternalId(
-    gladys,
+/** The states of an appliance, as { featureKey: value }. */
+function values(appliance, language = 'en') {
+  return Object.fromEntries(
+    readStates(gladys, appliance, language).map((state) => [
+      state.device_feature_external_id.split(':').pop(),
+      state.state ?? state.text,
+    ]),
   );
-  const message = await identifyDevice(gladys, weatherId, config);
-  assert.match(message.en, /no way to signal/);
+}
+
+function withStatus(appliance, statusList) {
+  return { ...appliance, statusList: { ...appliance.statusList, ...statusList } };
+}
+
+test('the gateway values are parsed: numbers as numbers, dates and texts as strings', () => {
+  assert.deepEqual(
+    parseStatus({ a: '1', b: '-18', c: '16679/02/18T23:47:45', ' d': '2.5', e: 'x' }),
+    { a: 1, b: -18, c: '16679/02/18T23:47:45', d: 2.5, e: 'x' },
+  );
 });
 
-test('the test_weather action returns a multi-language message', async () => {
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ current: { temperature_2m: 21.4, relative_humidity_2m: 55 } }),
+test('a split air conditioner: power, mode, setpoint, fan speed, room temperature', () => {
+  const ac = byType('009');
+  assert.equal(kindOf(ac), 'air_conditioner');
+  assert.ok(isControllable(ac));
+  assert.deepEqual(values(ac), {
+    connection: 'online',
+    power: 1,
+    mode: AC_MODE.COOLING,
+    target_temperature: 24,
+    fan_speed: AC_FAN_SPEED.MID,
+    indoor_temperature: 26,
   });
-  try {
-    const weatherStation = DEVICE_BLUEPRINTS.find((bp) => bp.key === 'weather-station');
-    const message = await weatherStation.actions.test_weather(gladys, { fields: {}, config });
-    assert.match(message.en, /21\.4/);
-    assert.match(message.fr, /21\.4/);
-  } finally {
-    globalThis.fetch = realFetch;
+  // f_humidity = 128: no humidity sensor on this model, no feature.
+  const device = buildDevice(gladys, ac, 'en');
+  assert.ok(!device.features.some((feature) => feature.external_id.endsWith(':indoor_humidity')));
+  const mode = device.features.find((feature) => feature.external_id.endsWith(':mode'));
+  assert.deepEqual(
+    mode.supported_options.map((option) => option.value),
+    [AC_MODE.AUTO, AC_MODE.COOLING, AC_MODE.HEATING, AC_MODE.DRYING, AC_MODE.FAN],
+  );
+  assert.equal(mode.read_only, false);
+});
+
+test('the air conditioner modes and fan speeds map both ways', () => {
+  const ac = byType('009');
+  const cases = [
+    [0, AC_MODE.FAN],
+    [1, AC_MODE.HEATING],
+    [2, AC_MODE.COOLING],
+    [3, AC_MODE.DRYING],
+    [4, AC_MODE.AUTO],
+  ];
+  for (const [raw, gladysValue] of cases) {
+    assert.equal(values(withStatus(ac, { t_work_mode: String(raw) })).mode, gladysValue);
+    assert.deepEqual(commandFor(ac, 'mode', gladysValue), {
+      properties: { t_work_mode: String(raw) },
+    });
   }
+  assert.deepEqual(commandFor(ac, 'fan_speed', AC_FAN_SPEED.HIGH), {
+    properties: { t_fan_speed: '9' },
+  });
+  // Quiet is not a speed of the split units.
+  assert.deepEqual(commandFor(ac, 'fan_speed', AC_FAN_SPEED.QUIET), { error: 'unsupported' });
+  assert.deepEqual(commandFor(ac, 'power', 0), { properties: { t_power: '0' } });
+});
+
+test('a window air conditioner has no heating, and its eco mode is shown as no mode', () => {
+  const ac = { ...byType('009'), deviceTypeCode: '008' };
+  assert.deepEqual(commandFor(ac, 'mode', AC_MODE.HEATING), { error: 'unsupported' });
+  assert.equal(values(withStatus(ac, { t_work_mode: '5' })).mode, undefined);
+  const device = buildDevice(gladys, ac, 'en');
+  const setpoint = device.features.find((feature) =>
+    feature.external_id.endsWith(':target_temperature'),
+  );
+  assert.equal(setpoint.max, 30);
+});
+
+test('an air conditioner set in Fahrenheit is shown and driven in Celsius', () => {
+  const portable = byType('006');
+  const state = values(portable);
+  // 72 °F = 22.2 °C, rounded to the half degree of a setpoint; 77 °F = 25 °C.
+  assert.equal(state.target_temperature, 22);
+  assert.equal(state.indoor_temperature, 25);
+  assert.equal(state.indoor_humidity, 48);
+  assert.equal(state.power, 0);
+  // 23 °C = 73.4 °F → 73.
+  assert.deepEqual(commandFor(portable, 'target_temperature', 23), {
+    properties: { t_temp: '73' },
+  });
+  // Out of bounds: clamped to the 16-32 °C range.
+  assert.deepEqual(commandFor(byType('009'), 'target_temperature', 40), {
+    properties: { t_temp: '32' },
+  });
+});
+
+test('a dehumidifier: power and two selects are commands, the humidities are readings', () => {
+  const dehumidifier = byType('007');
+  assert.equal(kindOf(dehumidifier), 'dehumidifier');
+  assert.deepEqual(values(dehumidifier), {
+    connection: 'online',
+    power: 1,
+    mode: 'manual',
+    fan_speed: 'auto',
+    indoor_humidity: 62,
+    target_humidity: 50,
+  });
+  assert.deepEqual(commandFor(dehumidifier, 'mode', 'clothes_dry'), {
+    properties: { t_work_mode: '3' },
+  });
+  assert.deepEqual(commandFor(dehumidifier, 'fan_speed', 'high'), {
+    properties: { t_fan_speed: '1' },
+  });
+  assert.deepEqual(commandFor(dehumidifier, 'mode', 'turbo'), { error: 'unsupported' });
+  assert.deepEqual(commandFor(dehumidifier, 'target_humidity', 40), { error: 'read_only' });
+});
+
+test('a washing machine is read only: status, time left, program, phase, door', () => {
+  const washer = byType('025');
+  assert.equal(kindOf(washer), 'washing_machine');
+  assert.equal(isControllable(washer), false);
+  assert.deepEqual(values(washer, 'fr'), {
+    connection: 'online',
+    status: 'running',
+    remaining_time: 42,
+    program: 'Programme 9',
+    phase: 'Phase 3',
+    door: 1,
+  });
+  for (const key of ['status', 'remaining_time', 'program', 'door']) {
+    assert.deepEqual(commandFor(washer, key, 1), { error: 'read_only' });
+  }
+  const device = buildDevice(gladys, washer, 'en');
+  assert.ok(device.features.every((feature) => feature.read_only));
+});
+
+test('a door follows the Gladys opening sensor: 0 = open, 1 = closed', () => {
+  // Hisense washer: Door_status 1 = open, 3 = closed.
+  const washer = byType('025');
+  assert.equal(values(withStatus(washer, { Door_status: '1' })).door, 0);
+  assert.equal(values(withStatus(washer, { Door_status: '3' })).door, 1);
+  // Dishwasher, dryer: 1 = closed, 2 = open.
+  const dishwasher = byType('015');
+  assert.equal(values(withStatus(dishwasher, { Door_status: '2' })).door, 0);
+  assert.equal(values(withStatus(dishwasher, { Door_status: '1' })).door, 1);
+  // Gorenje washer: 1 = open, 2 = closed, 3 = locked (closed).
+  const gorenje = byType('027');
+  assert.equal(values(withStatus(gorenje, { Door_status: '1' })).door, 0);
+  assert.equal(values(withStatus(gorenje, { Door_status: '3' })).door, 1);
+  // ASKO: 0 = closed, 1 = open.
+  const asko = { ...byType('003'), offlineState: 1 };
+  assert.equal(values(withStatus(asko, { DoorStatus: '1' })).door, 0);
+  assert.equal(values(withStatus(asko, { DoorStatus: '0' })).door, 1);
+  // Oven: 1 = closed, 2 = open; 0 = not available (no value).
+  const oven = byType('013');
+  assert.equal(values(withStatus(oven, { Door: '2' })).door, 0);
+  assert.equal(values(withStatus(oven, { Door: '0' })).door, undefined);
+});
+
+test('the time left is 0 outside a cycle, and "no value" codes are not published', () => {
+  const washer = byType('025');
+  assert.equal(values(withStatus(washer, { machine_status: '1' })).remaining_time, 0);
+  assert.equal(values(withStatus(washer, { machine_status: '3' })).remaining_time, 42);
+  // Gorenje: 1023 means no value.
+  const gorenje = withStatus(byType('027'), { Status: '6' });
+  assert.equal(values(gorenje).remaining_time, undefined);
+  assert.equal(
+    values(withStatus(gorenje, { Selected_program_remaining_time_in_minutes: '75' }))
+      .remaining_time,
+    75,
+  );
+  // Dishwasher: 65535 while idle → 0.
+  assert.equal(values(byType('015')).remaining_time, 0);
+});
+
+test('the phase tells a finished or delayed cycle the status property does not', () => {
+  const dishwasher = byType('015');
+  assert.equal(cycleStatusOf(dishwasher), 'standby');
+  assert.equal(cycleStatusOf(withStatus(dishwasher, { Current_program_phase: '9' })), 'finished');
+  assert.equal(cycleStatusOf(withStatus(dishwasher, { Current_program_phase: '3' })), 'delayed');
+  assert.equal(
+    cycleStatusOf(withStatus(dishwasher, { Device_status: '2', Current_program_phase: '7' })),
+    'running',
+  );
+  // Paused stays paused, whatever the phase.
+  assert.equal(
+    cycleStatusOf(withStatus(dishwasher, { Device_status: '3', Current_program_phase: '9' })),
+    'paused',
+  );
+  const dryer = byType('030');
+  assert.equal(cycleStatusOf(withStatus(dryer, { Current_program_phase: '5' })), 'finished');
+  assert.equal(cycleStatusOf(withStatus(dryer, { machine_status: '9' })), 'unknown');
+});
+
+test('an oven is read only: status, temperature, time left in minutes, door', () => {
+  const oven = byType('013');
+  assert.equal(isControllable(oven), false);
+  assert.deepEqual(values(oven), {
+    connection: 'online',
+    status: 'running',
+    oven_temperature: 180,
+    remaining_time: 25,
+    door: 1,
+  });
+  // In Fahrenheit (unit 2): 356 °F = 180 °C.
+  assert.equal(
+    values(withStatus(oven, { Oven_temperature_unit: '2', Oven_measured_temperature: '356' }))
+      .oven_temperature,
+    180,
+  );
+  assert.equal(remainingMinutesOf(oven), 25);
+});
+
+test('a fridge: compartments it has, setpoints read only', () => {
+  const fridge = byType('026');
+  assert.equal(kindOf(fridge), 'refrigerator');
+  assert.equal(isControllable(fridge), false);
+  assert.deepEqual(values(fridge), {
+    connection: 'online',
+    fridge_temperature: 5,
+    fridge_setpoint: 4,
+    freezer_temperature: -19,
+    freezer_setpoint: -18,
+  });
+  // A model without freezer reports -40: no freezer feature.
+  const noFreezer = withStatus(fridge, {
+    freeze_real_temperature: '-40',
+    freeze_temperature: '-40',
+  });
+  const device = buildDevice(gladys, noFreezer, 'en');
+  assert.ok(!device.features.some((feature) => feature.external_id.includes(':freezer_')));
+  assert.deepEqual(commandFor(fridge, 'fridge_setpoint', 3), { error: 'read_only' });
+});
+
+test('an unsupported appliance is published read only, with its connection alone', () => {
+  const hob = byType('010');
+  assert.equal(kindOf(hob), 'unsupported');
+  const device = buildDevice(gladys, hob, 'en');
+  assert.deepEqual(
+    device.features.map((feature) => [feature.external_id.split(':').pop(), feature.read_only]),
+    [['connection', true]],
+  );
+  assert.deepEqual(values(hob), { connection: 'online' });
+  assert.deepEqual(commandFor(hob, 'power', 1), { error: 'read_only' });
+});
+
+test('an offline appliance publishes its connection only: its last values are stale', () => {
+  const asko = byType('003');
+  assert.deepEqual(values(asko), { connection: 'offline' });
+});
+
+test('the external ids rest on the ConnectLife deviceId, never on the nickname', () => {
+  const ac = byType('009');
+  const device = buildDevice(gladys, ac, 'en');
+  const renamed = buildDevice(gladys, { ...ac, deviceNickName: 'Salon' }, 'en');
+  assert.equal(device.external_id, 'ext:test-integration:appliance:dev-0000000000000001');
+  assert.deepEqual(
+    renamed.features.map((feature) => feature.external_id),
+    device.features.map((feature) => feature.external_id),
+  );
+  assert.equal(renamed.name, 'Salon');
+});
+
+test('the feature names and option labels follow the configured language', () => {
+  const washer = byType('025');
+  const names = (language) =>
+    buildDevice(gladys, washer, language).features.map((feature) => feature.name);
+  assert.deepEqual(names('fr'), [
+    'État',
+    'Temps restant',
+    'Programme',
+    'Phase',
+    'Porte',
+    'Connexion',
+  ]);
+  assert.deepEqual(names('de'), ['Status', 'Restzeit', 'Programm', 'Phase', 'Tür', 'Verbindung']);
+  const status = buildDevice(gladys, washer, 'es').features[0];
+  assert.equal(
+    status.supported_options.find((option) => option.value === 'running').label,
+    'En marcha',
+  );
 });
